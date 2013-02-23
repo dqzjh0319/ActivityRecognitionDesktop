@@ -12,6 +12,8 @@
 #include <opencv2\core\core.hpp>
 #include <opencv2\highgui\highgui.hpp>
 #include <opencv2\video\video.hpp>
+#include <opencv2\video\background_segm.hpp>
+#include <opencv2\imgproc\imgproc.hpp>
 
 // CActivityRecognitionDesktopDlg dialog
 class CActivityRecognitionDesktopDlg : public CDialogEx
@@ -42,23 +44,19 @@ protected:
 	void OnSize(UINT nType, int cx, int cy);
 	BOOL DestroyWindow();
 	HANDLE hPSThread;
-	HANDLE hMDThread;
 	DWORD PSThreadID;
-	DWORD MDThreadID;
+
 
 public:
 	//afx_msg void OnBnClickedBtnOpen();
 	//afx_msg void OnBnClickedBtnClose();
 	afx_msg void OnBnClickedBtnProscan();
 	afx_msg void OnBnClickedBtnMtana();
-	friend void ProcessesScanThread();
-	friend void MotionDetectThread();
+	afx_msg void OnBnClickedBtnTest();
 };
 
-//void ThreadFunc();
+UINT MotionDetectThread(LPVOID lpParam);
 
-//void ProcessesScanThread();
-
-//void MotionDetectThread();
+void ProcessesScanThread();
 
 //void FrameProcess_Callback();

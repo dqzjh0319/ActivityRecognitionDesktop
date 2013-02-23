@@ -13,13 +13,19 @@
 #endif
 
 #define WM_SHOWTASK WM_USER+11
+#define MD_THRESHOLD 300
 
-// CAboutDlg dialog used for App About
+struct threadInfo{
+	CWnd* m_video;
+};
 
 volatile BOOL m_proScan;
 volatile BOOL m_motionDetect;
 HWND m_wnd;
+CWinThread* pMDThread;
+threadInfo Info;
 
+// CAboutDlg dialog used for App About
 class CAboutDlg : public CDialogEx
 {
 public:
@@ -74,6 +80,7 @@ BEGIN_MESSAGE_MAP(CActivityRecognitionDesktopDlg, CDialogEx)
 	//ON_BN_CLICKED(IDC_BTN_CLOSE, &CActivityRecognitionDesktopDlg::OnBnClickedBtnClose)
 	ON_BN_CLICKED(IDC_BTN_PROSCAN, &CActivityRecognitionDesktopDlg::OnBnClickedBtnProscan)
 	ON_BN_CLICKED(IDC_BTN_MTANA, &CActivityRecognitionDesktopDlg::OnBnClickedBtnMtana)
+	ON_BN_CLICKED(IDC_BTN_TEST, &CActivityRecognitionDesktopDlg::OnBnClickedBtnTest)
 END_MESSAGE_MAP()
 
 
@@ -276,19 +283,81 @@ void CActivityRecognitionDesktopDlg::DrawPicToHDC(cv::Mat m_cvImg, UINT ID)//Ipl
         SRCCOPY);
 }
 
-//void ThreadFunc()
-//{
-//    CTime time;
-//    CString strTime;
-//    m_proScan=TRUE;
-//    while(m_proScan)
-//    {
-//        time=CTime::GetCurrentTime();
-//        strTime=time.Format("%H:%M:%S");
-//        ::SetDlgItemText(m_wnd,IDC_TIME,strTime);
-//        Sleep(1000);
-//    }
-//}
+UINT MotionDetectThread(LPVOID lpParam)
+{
+    threadInfo* pInfo=(threadInfo*)lpParam;
+	CWnd* m_video = pInfo->m_video;
+	cv::VideoCapture mCap;
+	if(!mCap.open(0))
+	{
+		return -1;
+	}
+	cv::Mat m_cvImg;
+	cv::Mat orgFrame;
+	cv::Mat tmpFrame;
+	BITMAPINFO*			m_bmi;
+	BITMAPINFOHEADER*	m_bmih;
+	unsigned int		m_buffer[sizeof(BITMAPINFOHEADER)];// + sizeof(RGBQUAD)*256];
+	m_bmi = (BITMAPINFO*)m_buffer;
+	m_bmih = &(m_bmi->bmiHeader);
+	CRect rect;
+	CDC *pDC = m_video->GetDC();
+	m_video->GetClientRect(&rect);
+	SetStretchBltMode(pDC->m_hDC,COLORONCOLOR);
+	m_motionDetect = TRUE;
+	cv::BackgroundSubtractorMOG m_bs;
+	while(m_motionDetect)
+	{
+		mCap.read(orgFrame);
+		m_bs(orgFrame,tmpFrame,0.1);
+		std::vector<cv::Mat> bgr_planes;
+		tmpFrame.copyTo(m_cvImg);
+		//cv::split(tmpFrame, bgr_planes);
+		int histSize = 256;
+		// Set the ranges ( for B,G,R) )
+		float range[] = { 0, 256 } ;
+		const float* histRange = { range };
+		bool uniform = true; bool accumulate = false;
+		cv::Mat b_hist;//, g_hist, r_hist;
+		/// Compute the histograms:
+		calcHist( &tmpFrame, 1, 0, cv::Mat(), b_hist, 1, &histSize, &histRange, uniform, accumulate );
+		////calcHist( &bgr_planes[1], 1, 0, cv::Mat(), g_hist, 1, &histSize, &histRange, uniform, accumulate );
+		////calcHist( &bgr_planes[2], 1, 0, cv::Mat(), r_hist, 1, &histSize, &histRange, uniform, accumulate );
+		double maxV;
+		cv::minMaxLoc(b_hist,0, &maxV);
+		//*unsigned char test = b_hist.at<cv::Vec2b>(0,0).val[0];*/
+		/*char str[20];
+		sprintf(str,"%d",(int)(307200-maxV));*/
+		//::SetDlgItemText(m_wnd,IDC_EDT_MT,str);
+		int motionSum = tmpFrame.cols*tmpFrame.rows - (int)maxV;
+		if(motionSum > MD_THRESHOLD)
+		{
+			::SetDlgItemText(m_wnd,IDC_EDT_MT,"isMoving...");
+		}
+		else
+		{
+			::SetDlgItemText(m_wnd,IDC_EDT_MT,"isStatic...");
+		}
+		//To display the final processed frames;
+		memset(m_bmih, 0, sizeof(*m_bmih));
+		m_bmih->biSize = sizeof(BITMAPINFOHEADER);
+		m_bmih->biWidth = m_cvImg.cols;
+		m_bmih->biHeight = -m_cvImg.rows;           // 在自下而上的位图中 高度为负
+		m_bmih->biPlanes = 1;
+		m_bmih->biCompression = BI_RGB;
+		m_bmih->biBitCount = 8 * m_cvImg.channels();
+		//Fit the frame size to the display window size
+		StretchDIBits(      
+			pDC->GetSafeHdc(),
+			0, 0, rect.Width(), rect.Height(),
+			0, 0, m_cvImg.cols, m_cvImg.rows,
+			m_cvImg.data,
+			(BITMAPINFO*) m_bmi,
+			DIB_RGB_COLORS,
+			SRCCOPY);
+	}
+	return 0;
+}
 
 void ProcessesScanThread()
 {
@@ -326,12 +395,12 @@ void ProcessesScanThread()
 		//Process32Next( hProcessSnap, &pe32);
 	}
 }
+
 void CActivityRecognitionDesktopDlg::OnBnClickedBtnProscan()
 {
 	// TODO: Add your control notification handler code here
 	if(m_proScan == false)
 	{
-		
 		hPSThread=CreateThread(NULL,
 			0,
 			(LPTHREAD_START_ROUTINE)ProcessesScanThread,
@@ -346,22 +415,6 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnProscan()
 		m_proScan = false;
 		GetDlgItem(IDC_BTN_PROSCAN)->SetWindowText("Start");
 		GetDlgItem(IDC_LBL_SCAN)->SetWindowText("Idle...");
-	}
-}
-
-void MotionDetectThread(){
-	cv::VideoCapture myCap;
-	if(!myCap.open(0))
-	{
-		::SetDlgItemText(m_wnd,IDC_EDT_MT,"Can't open camera!!!");
-		return;
-	}
-	cv::Mat orgFrame;
-	m_motionDetect = TRUE;
-	while(m_motionDetect){
-		if(!myCap.read(orgFrame))
-			continue;
-		DrawPicToHDC(orgFrame, IDC_ShowImg);
 	}
 }
 
@@ -381,14 +434,12 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnMtana()
 						NULL,
 						0,
 						&ThreadID);*/
+	CWnd* m_video;
+	m_video = GetDlgItem(IDC_ShowImg);
+	Info.m_video = m_video;
 	if(m_motionDetect == false)
 	{
-		hMDThread=CreateThread(NULL,
-			0,
-			(LPTHREAD_START_ROUTINE)MotionDetectThread,
-			NULL,
-			0,
-			&MDThreadID);
+		pMDThread = AfxBeginThread(MotionDetectThread, &Info);
 		GetDlgItem(IDC_BTN_MTANA)->SetWindowText("Stop");
 		GetDlgItem(IDC_LBL_MT)->SetWindowText("Detecting...");
 	}
@@ -398,4 +449,38 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnMtana()
 		GetDlgItem(IDC_BTN_MTANA)->SetWindowText("Start");
 		GetDlgItem(IDC_LBL_MT)->SetWindowText("Idle...");
 	}
+}
+
+
+void CActivityRecognitionDesktopDlg::OnBnClickedBtnTest()
+{
+	// TODO: Add your control notification handler code here
+	//CWnd* m_video;
+	//m_video = GetDlgItem(IDC_ShowImg);
+	////cv::Mat tmpImg;
+	////tmpImg = cv::imread("C:\\Users\\Public\\Pictures\\Sample Pictures\\Jellyfish.jpg");
+	///*if (tmpImg == NULL) 
+	//{
+	//	GetDlgItem(IDC_BTN_MTANA)->SetWindowText("Can't open the image!!!");
+	//	return;
+	//}*/
+	///*if (!pCapture.open(0)) 
+	//{
+	//	MessageBox("Failed to open the camera!!!");
+	//	return;
+	//}*/
+	////Info.cvImg = tmpImg;
+	//Info.m_video = m_video;
+	//if(m_motionDetect == false)
+	//{
+	//	pThread = AfxBeginThread(ThreadFunc, &Info);
+	//	GetDlgItem(IDC_BTN_MTANA)->SetWindowText("Stop");
+	//	GetDlgItem(IDC_LBL_MT)->SetWindowText("Detecting...");
+	//}
+	//else
+	//{
+	//	m_motionDetect = false;
+	//	GetDlgItem(IDC_BTN_MTANA)->SetWindowText("Start");
+	//	GetDlgItem(IDC_LBL_MT)->SetWindowText("Idle...");
+	//}
 }
