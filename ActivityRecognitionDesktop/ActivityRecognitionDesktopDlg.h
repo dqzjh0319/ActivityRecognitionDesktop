@@ -53,10 +53,11 @@ public:
 	afx_msg void OnBnClickedBtnProscan();
 	afx_msg void OnBnClickedBtnMtana();
 	afx_msg void OnBnClickedBtnTest();
+	afx_msg void OnBnClickedBtnIm();
 };
-
 UINT MotionDetectThread(LPVOID lpParam);
 
 void ProcessesScanThread();
 
+int coutfile(LPARAM lParam);
 //void FrameProcess_Callback();

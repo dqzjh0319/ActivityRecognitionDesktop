@@ -1,0 +1,9 @@
+; KeyMouseHookDLL.def : Declares the module parameters for the DLL.
+
+LIBRARY "KeyMouseHookDLL"
+
+EXPORTS
+    ; Explicit exports can go here
+	InstallHook
+	UnHook
+	add

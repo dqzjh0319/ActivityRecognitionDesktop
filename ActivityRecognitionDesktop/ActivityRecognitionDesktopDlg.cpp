@@ -15,15 +15,25 @@
 #define WM_SHOWTASK WM_USER+11
 #define MD_THRESHOLD 300
 
+typedef BOOL(*FUNC)(BOOL, DWORD, HWND);
+typedef int(*FUND)();
+
 struct threadInfo{
 	CWnd* m_video;
 };
 
 volatile BOOL m_proScan;
 volatile BOOL m_motionDetect;
+volatile BOOL m_InputMonitor;
+
 HWND m_wnd;
 CWinThread* pMDThread;
 threadInfo Info;
+static HINSTANCE hinstDLL; 
+typedef BOOL (CALLBACK *inshook)(HWND m_wnd); 
+typedef BOOL (CALLBACK *unhook)();
+unhook unstkbhook;
+inshook instkbhook;
 
 // CAboutDlg dialog used for App About
 class CAboutDlg : public CDialogEx
@@ -81,6 +91,7 @@ BEGIN_MESSAGE_MAP(CActivityRecognitionDesktopDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_PROSCAN, &CActivityRecognitionDesktopDlg::OnBnClickedBtnProscan)
 	ON_BN_CLICKED(IDC_BTN_MTANA, &CActivityRecognitionDesktopDlg::OnBnClickedBtnMtana)
 	ON_BN_CLICKED(IDC_BTN_TEST, &CActivityRecognitionDesktopDlg::OnBnClickedBtnTest)
+	ON_BN_CLICKED(IDC_BTN_IM, &CActivityRecognitionDesktopDlg::OnBnClickedBtnIm)
 END_MESSAGE_MAP()
 
 
@@ -126,6 +137,7 @@ BOOL CActivityRecognitionDesktopDlg::OnInitDialog()
 	strcpy(m_nid.szTip, charray);
     Shell_NotifyIcon(NIM_ADD, &m_nid);                // 在托盘区添加图标
 	m_wnd = AfxGetMainWnd()->m_hWnd;
+	m_InputMonitor = false;
 
 	return TRUE;  // return TRUE  unless you set the focus to a control
 }
@@ -451,7 +463,6 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnMtana()
 	}
 }
 
-
 void CActivityRecognitionDesktopDlg::OnBnClickedBtnTest()
 {
 	// TODO: Add your control notification handler code here
@@ -471,16 +482,35 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnTest()
 	//}*/
 	////Info.cvImg = tmpImg;
 	//Info.m_video = m_video;
-	//if(m_motionDetect == false)
-	//{
-	//	pThread = AfxBeginThread(ThreadFunc, &Info);
-	//	GetDlgItem(IDC_BTN_MTANA)->SetWindowText("Stop");
-	//	GetDlgItem(IDC_LBL_MT)->SetWindowText("Detecting...");
-	//}
-	//else
-	//{
-	//	m_motionDetect = false;
-	//	GetDlgItem(IDC_BTN_MTANA)->SetWindowText("Start");
-	//	GetDlgItem(IDC_LBL_MT)->SetWindowText("Idle...");
-	//}
+	/*const char* dllName = "KeyHookLib.dll"; 
+	const char* funName3 = "installHook";
+	HMODULE hDLL = LoadLibrary(dllName);
+	FUNC fp3 = FUNC(GetProcAddress(hDLL,funName3));*/
+}
+
+void CActivityRecognitionDesktopDlg::OnBnClickedBtnIm()
+{
+	// TODO: Add your control notification handler code here
+	if(m_InputMonitor == false)
+	{
+		if(hinstDLL=LoadLibrary((LPCTSTR)"KeyMouseHookDLL.dll"))
+		{
+			instkbhook=(inshook)GetProcAddress(hinstDLL, "InstallHook"); 
+			unstkbhook=(unhook)GetProcAddress(hinstDLL, "UnHook");
+		}
+		if(instkbhook(m_wnd))
+			GetDlgItem(IDC_LBL_IM)->SetWindowText("Montering...");
+		else
+			GetDlgItem(IDC_LBL_IM)->SetWindowText("Failed Hook...");
+		m_InputMonitor = true;
+		GetDlgItem(IDC_BTN_IM)->SetWindowText("Stop");
+	}
+	else
+	{
+		unstkbhook();
+		m_InputMonitor = false;
+		GetDlgItem(IDC_BTN_IM)->SetWindowText("Start");
+		GetDlgItem(IDC_LBL_IM)->SetWindowText("Idle...");
+		FreeLibrary(hinstDLL);
+	}
 }
