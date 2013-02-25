@@ -14,6 +14,7 @@
 #include <opencv2\video\video.hpp>
 #include <opencv2\video\background_segm.hpp>
 #include <opencv2\imgproc\imgproc.hpp>
+#include "mscomm.h"
 
 // CActivityRecognitionDesktopDlg dialog
 class CActivityRecognitionDesktopDlg : public CDialogEx
@@ -54,10 +55,18 @@ public:
 	afx_msg void OnBnClickedBtnMtana();
 	afx_msg void OnBnClickedBtnTest();
 	afx_msg void OnBnClickedBtnIm();
+	afx_msg void OnBnClickedBtnCl();
+	// Serial Port Communication Module
+	CMscomm m_mscomm;
+	DECLARE_EVENTSINK_MAP()
+	CString m_EditReceive;
+	void OnCommMscomm();
 };
 UINT MotionDetectThread(LPVOID lpParam);
 
 void ProcessesScanThread();
 
 int coutfile(LPARAM lParam);
+
+void ListeningCom();
 //void FrameProcess_Callback();

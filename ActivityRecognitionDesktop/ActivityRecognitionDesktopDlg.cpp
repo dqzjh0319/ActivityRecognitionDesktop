@@ -25,6 +25,15 @@ struct threadInfo{
 volatile BOOL m_proScan;
 volatile BOOL m_motionDetect;
 volatile BOOL m_InputMonitor;
+volatile BOOL m_CommListen;
+
+BOOL moving;
+BOOL inputing;
+BOOL working;
+
+CCriticalSection sec_moving;
+CCriticalSection sec_inputing;
+CCriticalSection sec_working;
 
 HWND m_wnd;
 CWinThread* pMDThread;
@@ -67,11 +76,9 @@ END_MESSAGE_MAP()
 
 // CActivityRecognitionDesktopDlg dialog
 
-
-
-
 CActivityRecognitionDesktopDlg::CActivityRecognitionDesktopDlg(CWnd* pParent /*=NULL*/)
 	: CDialogEx(CActivityRecognitionDesktopDlg::IDD, pParent)
+	, m_EditReceive(_T(""))
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
@@ -79,6 +86,8 @@ CActivityRecognitionDesktopDlg::CActivityRecognitionDesktopDlg(CWnd* pParent /*=
 void CActivityRecognitionDesktopDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_MSCOMM, m_mscomm);
+	DDX_Text(pDX, IDC_STATIC_RD, m_EditReceive);
 }
 
 BEGIN_MESSAGE_MAP(CActivityRecognitionDesktopDlg, CDialogEx)
@@ -92,8 +101,12 @@ BEGIN_MESSAGE_MAP(CActivityRecognitionDesktopDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_MTANA, &CActivityRecognitionDesktopDlg::OnBnClickedBtnMtana)
 	ON_BN_CLICKED(IDC_BTN_TEST, &CActivityRecognitionDesktopDlg::OnBnClickedBtnTest)
 	ON_BN_CLICKED(IDC_BTN_IM, &CActivityRecognitionDesktopDlg::OnBnClickedBtnIm)
+	ON_BN_CLICKED(IDC_BTN_CL, &CActivityRecognitionDesktopDlg::OnBnClickedBtnCl)
 END_MESSAGE_MAP()
 
+BEGIN_EVENTSINK_MAP(CActivityRecognitionDesktopDlg, CDialogEx)
+	ON_EVENT(CActivityRecognitionDesktopDlg, IDC_MSCOMM, 1, CActivityRecognitionDesktopDlg::OnCommMscomm, VTS_NONE)
+END_EVENTSINK_MAP()
 
 // CActivityRecognitionDesktopDlg message handlers
 
@@ -127,6 +140,16 @@ BOOL CActivityRecognitionDesktopDlg::OnInitDialog()
 	SetIcon(m_hIcon, FALSE);		// Set small icon
 
 	// TODO: Add extra initialization here
+	moving = TRUE;
+	inputing = TRUE;
+	working = FALSE;
+	sec_moving.Unlock();
+	sec_inputing.Unlock();
+	sec_working.Unlock();
+	GetDlgItem(IDC_EDT_SCAN)->SetWindowText("N/A");
+	GetDlgItem(IDC_EDT_MT)->SetWindowText("N/A");
+	GetDlgItem(IDC_EDT_IM)->SetWindowText("N/A");
+
 	m_nid.cbSize  = (DWORD)sizeof(NOTIFYICONDATA);
     m_nid.hWnd    = this->m_hWnd;
     m_nid.uID     = IDR_MAINFRAME;
@@ -138,6 +161,7 @@ BOOL CActivityRecognitionDesktopDlg::OnInitDialog()
     Shell_NotifyIcon(NIM_ADD, &m_nid);                // 在托盘区添加图标
 	m_wnd = AfxGetMainWnd()->m_hWnd;
 	m_InputMonitor = false;
+	m_CommListen = false;
 
 	return TRUE;  // return TRUE  unless you set the focus to a control
 }
@@ -345,10 +369,16 @@ UINT MotionDetectThread(LPVOID lpParam)
 		if(motionSum > MD_THRESHOLD)
 		{
 			::SetDlgItemText(m_wnd,IDC_EDT_MT,"isMoving...");
+			sec_moving.Lock();
+			moving = TRUE;
+			sec_moving.Unlock();
 		}
 		else
 		{
 			::SetDlgItemText(m_wnd,IDC_EDT_MT,"isStatic...");
+			sec_moving.Lock();
+			moving = FALSE;
+			sec_moving.Unlock();
 		}
 		//To display the final processed frames;
 		memset(m_bmih, 0, sizeof(*m_bmih));
@@ -400,9 +430,19 @@ void ProcessesScanThread()
 		}while( Process32Next( hProcessSnap, &pe32) );
 		//t_str.Format("%s",pe32.szExeFile);
 		if(isWorkProcesses)
+		{
 			::SetDlgItemText(m_wnd,IDC_EDT_SCAN,"isWorkingPro");
+			sec_working.Lock();
+			working = TRUE;
+			sec_working.Unlock();
+		}
 		else
+		{
 			::SetDlgItemText(m_wnd,IDC_EDT_SCAN,"noWorkingPro");
+			sec_working.Lock();
+			working = FALSE;
+			sec_working.Unlock();
+		}
 		Sleep(1000);
 		//Process32Next( hProcessSnap, &pe32);
 	}
@@ -427,6 +467,7 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnProscan()
 		m_proScan = false;
 		GetDlgItem(IDC_BTN_PROSCAN)->SetWindowText("Start");
 		GetDlgItem(IDC_LBL_SCAN)->SetWindowText("Idle...");
+		GetDlgItem(IDC_EDT_SCAN)->SetWindowText("N/A");
 	}
 }
 
@@ -514,3 +555,80 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnIm()
 		FreeLibrary(hinstDLL);
 	}
 }
+
+void CActivityRecognitionDesktopDlg::OnCommMscomm()
+{
+	// TODO: Add your message handler code here
+	static unsigned int cnt=0;
+    VARIANT variant_inp;
+    COleSafeArray safearray_inp;
+    long len,k;
+    unsigned intdata[1024]={0};
+    byte rxdata[1024];//设置BYTE数组
+    CString strtemp;
+    if (m_mscomm.get_CommEvent()==2)//值为2表示接收缓冲区内有字符
+    {
+        cnt++;
+        variant_inp = m_mscomm.get_Input();//读取缓冲区
+        safearray_inp = variant_inp;//变量转换
+        len = safearray_inp.GetOneDimSize();//得到有效的数据长度
+        for (k=0;k<len;k++)
+        {
+            safearray_inp.GetElement(&k,rxdata+k);
+        }
+        char c_char;
+        for (k=0;k<len;k++)
+        {
+            strtemp.Format(_T("%c"),*(rxdata+k));
+            m_EditReceive+=strtemp;
+        }
+        //CString temp=_T("\r\r\n");//换行
+        //m_EditReceive+=temp;
+    }
+    UpdateData(FALSE);
+}
+
+void CActivityRecognitionDesktopDlg::OnBnClickedBtnCl()
+{
+	// TODO: Add your control notification handler code here
+	if(!m_CommListen)
+	{
+		if (m_mscomm.get_PortOpen())//如果串口是打开的，则关闭串口
+		{
+			m_mscomm.put_PortOpen(FALSE);
+		}
+		m_mscomm.put__CommPort(3);//选择COM3,我笔记本本身没串口，usb转出来的串口号为3，可根据实际选择，但串口关闭等也要做相应更改
+		m_mscomm.put_InBufferSize(1024);//接收缓冲区
+		m_mscomm.put_OutBufferSize(1024);//发送缓冲区
+		m_mscomm.put_InputLen(0);//设置当前接收区数据长度为0，表示全部读取
+		m_mscomm.put_InputMode(1);//以二进制方式读写数据
+		m_mscomm.put_RThreshold(1);//接收缓冲区有1个及1个以上字符时，将引发接收数据的OnComm事件
+		m_mscomm.put_Settings(_T("9600,n,8,1"));//波特率9600，无校验，8个数据位，1个停止1位
+		if (!m_mscomm.get_PortOpen())//如果串口没有打开
+		{
+			m_mscomm.put_PortOpen(TRUE);//打开串口
+			GetDlgItem(IDC_LBL_CL)->SetWindowText("Listening...");
+			GetDlgItem(IDC_BTN_CL)->SetWindowText("Close");
+			m_CommListen = TRUE;
+		}
+		else
+		{
+			m_mscomm.put_OutBufferCount(0);//
+			//AfxMessageBox(_T("Port 3 open successful!"));
+			GetDlgItem(IDC_LBL_CL)->SetWindowText("Open failed!!!");
+			GetDlgItem(IDC_EDT_CL)->SetWindowText("N/A");
+			GetDlgItem(IDC_BTN_CL)->SetWindowText("Open");
+			m_CommListen = FALSE;
+		}
+	}
+	else
+	{
+		m_mscomm.put_PortOpen(FALSE);  
+        AfxMessageBox(_T("串口3已关闭！"));  
+		GetDlgItem(IDC_LBL_CL)->SetWindowText("Port closed...");
+		GetDlgItem(IDC_EDT_CL)->SetWindowText("N/A");
+		GetDlgItem(IDC_BTN_CL)->SetWindowText("Open");
+		m_CommListen = FALSE;
+	}
+}
+
