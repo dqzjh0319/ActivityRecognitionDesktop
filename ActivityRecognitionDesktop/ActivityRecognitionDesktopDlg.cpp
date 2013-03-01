@@ -25,15 +25,19 @@ struct threadInfo{
 volatile BOOL m_proScan;
 volatile BOOL m_motionDetect;
 volatile BOOL m_InputMonitor;
+volatile BOOL m_ProStat;
 
 HWND m_wnd;
 CWinThread* pMDThread;
+CWinThread* pPStatThread;
 threadInfo Info;
 static HINSTANCE hinstDLL; 
 typedef BOOL (CALLBACK *inshook)(HWND m_wnd); 
 typedef BOOL (CALLBACK *unhook)();
 unhook unstkbhook;
 inshook instkbhook;
+
+int status;
 
 // CAboutDlg dialog used for App About
 class CAboutDlg : public CDialogEx
@@ -92,6 +96,7 @@ BEGIN_MESSAGE_MAP(CActivityRecognitionDesktopDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_MTANA, &CActivityRecognitionDesktopDlg::OnBnClickedBtnMtana)
 	ON_BN_CLICKED(IDC_BTN_TEST, &CActivityRecognitionDesktopDlg::OnBnClickedBtnTest)
 	ON_BN_CLICKED(IDC_BTN_IM, &CActivityRecognitionDesktopDlg::OnBnClickedBtnIm)
+	ON_BN_CLICKED(IDC_BTN_PS, &CActivityRecognitionDesktopDlg::OnBnClickedBtnPs)
 END_MESSAGE_MAP()
 
 
@@ -138,6 +143,8 @@ BOOL CActivityRecognitionDesktopDlg::OnInitDialog()
     Shell_NotifyIcon(NIM_ADD, &m_nid);                // 在托盘区添加图标
 	m_wnd = AfxGetMainWnd()->m_hWnd;
 	m_InputMonitor = false;
+	m_ProStat = false;
+	status = 2;
 
 	return TRUE;  // return TRUE  unless you set the focus to a control
 }
@@ -463,30 +470,6 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnMtana()
 	}
 }
 
-void CActivityRecognitionDesktopDlg::OnBnClickedBtnTest()
-{
-	// TODO: Add your control notification handler code here
-	//CWnd* m_video;
-	//m_video = GetDlgItem(IDC_ShowImg);
-	////cv::Mat tmpImg;
-	////tmpImg = cv::imread("C:\\Users\\Public\\Pictures\\Sample Pictures\\Jellyfish.jpg");
-	///*if (tmpImg == NULL) 
-	//{
-	//	GetDlgItem(IDC_BTN_MTANA)->SetWindowText("Can't open the image!!!");
-	//	return;
-	//}*/
-	///*if (!pCapture.open(0)) 
-	//{
-	//	MessageBox("Failed to open the camera!!!");
-	//	return;
-	//}*/
-	////Info.cvImg = tmpImg;
-	//Info.m_video = m_video;
-	/*const char* dllName = "KeyHookLib.dll"; 
-	const char* funName3 = "installHook";
-	HMODULE hDLL = LoadLibrary(dllName);
-	FUNC fp3 = FUNC(GetProcAddress(hDLL,funName3));*/
-}
 
 void CActivityRecognitionDesktopDlg::OnBnClickedBtnIm()
 {
@@ -512,5 +495,121 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnIm()
 		GetDlgItem(IDC_BTN_IM)->SetWindowText("Start");
 		GetDlgItem(IDC_LBL_IM)->SetWindowText("Idle...");
 		FreeLibrary(hinstDLL);
+	}
+}
+
+UINT ReceiverThreadProc(LPVOID pParam)
+{
+	CSocket RecSock;
+	CSocket Connect;
+	char buffer[1024];
+	if (!AfxSocketInit())  
+    {  
+        AfxMessageBox("Socket initialized failed!!!");  
+        return FALSE;   
+    }
+	if(!RecSock.Create((UINT)23456, SOCK_STREAM, "127.0.0.1"))
+	{
+		return -1;
+	}
+	if (!RecSock.Listen())
+	{
+		return -1;
+	}
+    if(!RecSock.Accept(Connect))
+    {        
+        CString str;
+        str.Format("Accept error code:%d",RecSock.GetLastError());
+        AfxMessageBox(str);
+        return 0;
+    }
+    while(true)
+	{
+		int len = Connect.Receive(buffer,sizeof(buffer));
+		if(len == 0)
+		{
+			break;
+		}
+		else if (len<0)
+		{        
+			CString str;
+			str.Format("Receive error code:%d",RecSock.GetLastError());
+			AfxMessageBox(str);
+			break;
+		}
+		
+		//CTime t = CTime::GetCurrentTime();
+		CString rstr, sstr;
+		rstr.Format("%s",buffer);
+		rstr = rstr.GetBufferSetLength(len);
+		if(rstr == "req status")
+		{
+			switch(status)
+			{
+			case 0:sstr = "Sleeping";break;
+			case 1:sstr = "Working";break;
+			case 2:sstr = "Playing";break;
+			default: sstr = "Internel error";break;
+			}
+		}
+		else
+		{
+			sstr = "Bad request!";
+		}
+		Connect.Send(sstr.GetBuffer(0), sstr.GetLength());
+		//str = t.Format("[%Y-%m-%d %H:%M:%S]") + str;
+	}
+    Connect.Close();
+}
+
+void CActivityRecognitionDesktopDlg::OnBnClickedBtnTest()
+{
+	// TODO: Add your control notification handler code here
+//	pMDThread = AfxBeginThread(ReceiverThreadProc, NULL);
+}
+
+//UINT SenderThreadProc(LPVOID pParam)
+//{
+//	if (!AfxSocketInit())  
+//     {  
+//         AfxMessageBox("Socket initial failed!!!");  
+//         return FALSE;   
+//     }
+//     char buf[BUFLEN];
+//     CSocket SendSock;
+//     SendSock.Create(23456U,SOCK_STREAM,"127.0.0.1");
+//     if (!SendSock.Connect((SOCKADDR *)&RecAddr,sizeof(RecAddr)))
+//     {
+//         CString str;
+//         str.Format("Connect error code:%d",SendSock.GetLastError());
+//         AfxMessageBox(str);
+//         free(temp);
+//         return 0;
+//     }
+//	 while(TRUE)
+//	 {
+//		 
+//		 //往buf中添加数据
+//		 SendSock.Send(buf,BUFLEN);
+//		 SendSock.Close();
+//	 }
+//     return 1;
+//}
+
+void CActivityRecognitionDesktopDlg::OnBnClickedBtnPs()
+{
+	// TODO: Add your control notification handler code here
+	if(m_ProStat == false)
+	{	
+		pPStatThread = AfxBeginThread(ReceiverThreadProc, NULL);
+		GetDlgItem(IDC_LBL_PS)->SetWindowText("Providing...");
+		m_ProStat = true;
+		GetDlgItem(IDC_BTN_PS)->SetWindowText("Stop");
+	}
+	else
+	{
+		m_ProStat = false;
+		GetDlgItem(IDC_BTN_PS)->SetWindowText("Start");
+		GetDlgItem(IDC_LBL_PS)->SetWindowText("Idle...");
 	}
 }

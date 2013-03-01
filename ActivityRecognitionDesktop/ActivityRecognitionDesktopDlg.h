@@ -14,6 +14,7 @@
 #include <opencv2\video\video.hpp>
 #include <opencv2\video\background_segm.hpp>
 #include <opencv2\imgproc\imgproc.hpp>
+#include <afxsock.h>
 
 // CActivityRecognitionDesktopDlg dialog
 class CActivityRecognitionDesktopDlg : public CDialogEx
@@ -46,7 +47,6 @@ protected:
 	HANDLE hPSThread;
 	DWORD PSThreadID;
 
-
 public:
 	//afx_msg void OnBnClickedBtnOpen();
 	//afx_msg void OnBnClickedBtnClose();
@@ -54,10 +54,15 @@ public:
 	afx_msg void OnBnClickedBtnMtana();
 	afx_msg void OnBnClickedBtnTest();
 	afx_msg void OnBnClickedBtnIm();
+	afx_msg void OnBnClickedBtnPs();
 };
 UINT MotionDetectThread(LPVOID lpParam);
 
 void ProcessesScanThread();
 
 int coutfile(LPARAM lParam);
+
+UINT ReceiverThreadProc(LPVOID pParam);
+
+//UINT SenderThreadProc(LPVOID pParam);
 //void FrameProcess_Callback();
