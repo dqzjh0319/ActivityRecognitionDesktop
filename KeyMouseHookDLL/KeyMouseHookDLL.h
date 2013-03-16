@@ -19,7 +19,7 @@ LRESULT  CALLBACK KeyboardProc(
                             LPARAM lParam);
 
 
-BOOL __declspec(dllexport)__stdcall  InstallHook(HWND m_wnd);
+BOOL __declspec(dllexport)__stdcall  InstallHook(HWND m_wnd, BOOL *s);
 
 BOOL __declspec(dllexport)__stdcall UnHook();
 

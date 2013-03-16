@@ -17,6 +17,7 @@ static HHOOK hm=NULL;
 #pragma data_seg()
 HINSTANCE hins=NULL;
 HWND myhwnd;
+BOOL *status;
 
 //
 //TODO: If this DLL is dynamically linked against the MFC DLLs,
@@ -56,14 +57,15 @@ LRESULT CALLBACK KeyboardProc(int nCode,WPARAM wParam,LPARAM lParam)
 	{ 
 		return ::CallNextHookEx(hkb, nCode, wParam, lParam); 
 	} 
-	FILE* fstream; 
+	/*FILE* fstream; 
 	char str[10]; 
 	if(!(fstream=fopen("key.txt","a+"))) 
 		return 0;     
 	::GetKeyNameText(lParam, str, 10); 
 	fprintf(fstream,"123"); 
 	fclose(fstream);  
-	::SetDlgItemText(myhwnd,1014,"test");
+	::SetDlgItemText(myhwnd,1014,"test");*/
+	*status = TRUE;
 	LRESULT RetVal = CallNextHookEx( hkb, nCode, wParam, lParam );	
 	return  RetVal;
 }
@@ -76,20 +78,22 @@ LRESULT CALLBACK MouseProc(int nCode,WPARAM wParam,LPARAM lParam)
 	{ 
 		return ::CallNextHookEx(hm, nCode, wParam, lParam); 
 	} 
-	FILE* fstream; 
+	/*FILE* fstream; 
 	char str[10]; 
 	if(!(fstream=fopen("Mouse.txt","a+"))) 
 		return 0;     
 	::GetKeyNameText(lParam, str, 10); 
 	fprintf(fstream,"89"); 
-	fclose(fstream);  
+	fclose(fstream); */ 
+	*status = TRUE;
 	LRESULT RetVal = CallNextHookEx( hm, nCode, wParam, lParam );	
 	return  RetVal;
 }
 
-BOOL __declspec(dllexport)__stdcall InstallHook(HWND m_wnd)
+BOOL __declspec(dllexport)__stdcall InstallHook(HWND m_wnd, BOOL* s)
 {
 	myhwnd = m_wnd;
+	status = s;
 	hkb=SetWindowsHookEx(WH_KEYBOARD_LL,KeyboardProc, 0, 0);
 	hm=SetWindowsHookEx(WH_MOUSE_LL,MouseProc, 0, 0);
 	return TRUE;

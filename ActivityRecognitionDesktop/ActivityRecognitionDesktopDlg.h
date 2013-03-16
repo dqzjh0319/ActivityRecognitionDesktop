@@ -14,7 +14,10 @@
 #include <opencv2\video\video.hpp>
 #include <opencv2\video\background_segm.hpp>
 #include <opencv2\imgproc\imgproc.hpp>
+#include <opencv2\objdetect\objdetect.hpp>
 #include <afxsock.h>
+#include "winsock.h"
+#include <afxtempl.h>
 
 // CActivityRecognitionDesktopDlg dialog
 class CActivityRecognitionDesktopDlg : public CDialogEx
@@ -46,6 +49,7 @@ protected:
 	BOOL DestroyWindow();
 	HANDLE hPSThread;
 	DWORD PSThreadID;
+	cv::CascadeClassifier haar_cascade;
 
 public:
 	//afx_msg void OnBnClickedBtnOpen();
@@ -55,8 +59,16 @@ public:
 	afx_msg void OnBnClickedBtnTest();
 	afx_msg void OnBnClickedBtnIm();
 	afx_msg void OnBnClickedBtnPs();
+	void OnTimer(UINT_PTR nIDEvent);
+	//void FaceDetection();
+	//cv::VideoCapture mCap;
+	afx_msg void OnBnClickedOk();
+	afx_msg void OnBnClickedBtnPr();
 };
+
 UINT MotionDetectThread(LPVOID lpParam);
+
+UINT FaceDetectionThread(LPVOID lpParam);
 
 void ProcessesScanThread();
 
@@ -64,5 +76,5 @@ int coutfile(LPARAM lParam);
 
 UINT ReceiverThreadProc(LPVOID pParam);
 
-//UINT SenderThreadProc(LPVOID pParam);
+UINT RequestThreadProc(LPVOID pParam);
 //void FrameProcess_Callback();

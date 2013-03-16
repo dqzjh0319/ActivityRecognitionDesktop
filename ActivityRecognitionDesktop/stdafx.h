@@ -39,6 +39,7 @@
 
 
 #include <afxsock.h>            // MFC socket extensions
+#include <afxdisp.h>
 
 
 

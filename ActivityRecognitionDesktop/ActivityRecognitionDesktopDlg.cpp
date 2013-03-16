@@ -14,25 +14,44 @@
 
 #define WM_SHOWTASK WM_USER+11
 #define MD_THRESHOLD 300
+#define STATUS_REFRESH_TIMER 1
+#define INPUT_STATUS_TIMER 2
 
 typedef BOOL(*FUNC)(BOOL, DWORD, HWND);
 typedef int(*FUND)();
 
 struct threadInfo{
 	CWnd* m_video;
+	cv::CascadeClassifier haar_cascade;
 };
 
 volatile BOOL m_proScan;
 volatile BOOL m_motionDetect;
 volatile BOOL m_InputMonitor;
 volatile BOOL m_ProStat;
+volatile BOOL timerTest;
+volatile BOOL m_ReqPosture;
+
+BOOL isMoving;
+BOOL isWorkingProcesses;
+BOOL isInputing;
+int posture;
+int tPosture;
+int keepCount;
+
+CCriticalSection motionCS;
+CCriticalSection workProCS;
+CCriticalSection inputCS;
+CCriticalSection postureCS;
+
+BOOL tmpInputStatus;
 
 HWND m_wnd;
 CWinThread* pMDThread;
 CWinThread* pPStatThread;
 threadInfo Info;
 static HINSTANCE hinstDLL; 
-typedef BOOL (CALLBACK *inshook)(HWND m_wnd); 
+typedef BOOL (CALLBACK *inshook)(HWND m_wnd, BOOL *s); 
 typedef BOOL (CALLBACK *unhook)();
 unhook unstkbhook;
 inshook instkbhook;
@@ -90,6 +109,7 @@ BEGIN_MESSAGE_MAP(CActivityRecognitionDesktopDlg, CDialogEx)
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
 	ON_MESSAGE(WM_SHOWTASK,OnShowTask)
+	ON_WM_TIMER()
 	//ON_BN_CLICKED(IDC_BTN_OPEN, &CActivityRecognitionDesktopDlg::OnBnClickedBtnOpen)
 	//ON_BN_CLICKED(IDC_BTN_CLOSE, &CActivityRecognitionDesktopDlg::OnBnClickedBtnClose)
 	ON_BN_CLICKED(IDC_BTN_PROSCAN, &CActivityRecognitionDesktopDlg::OnBnClickedBtnProscan)
@@ -97,6 +117,8 @@ BEGIN_MESSAGE_MAP(CActivityRecognitionDesktopDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_TEST, &CActivityRecognitionDesktopDlg::OnBnClickedBtnTest)
 	ON_BN_CLICKED(IDC_BTN_IM, &CActivityRecognitionDesktopDlg::OnBnClickedBtnIm)
 	ON_BN_CLICKED(IDC_BTN_PS, &CActivityRecognitionDesktopDlg::OnBnClickedBtnPs)
+	ON_BN_CLICKED(IDOK, &CActivityRecognitionDesktopDlg::OnBnClickedOk)
+	ON_BN_CLICKED(IDC_BTN_PR, &CActivityRecognitionDesktopDlg::OnBnClickedBtnPr)
 END_MESSAGE_MAP()
 
 
@@ -142,9 +164,28 @@ BOOL CActivityRecognitionDesktopDlg::OnInitDialog()
 	strcpy(m_nid.szTip, charray);
     Shell_NotifyIcon(NIM_ADD, &m_nid);                // 在托盘区添加图标
 	m_wnd = AfxGetMainWnd()->m_hWnd;
-	m_InputMonitor = false;
-	m_ProStat = false;
+
+	m_proScan = FALSE;
+	m_motionDetect = FALSE;
+	m_InputMonitor = FALSE;
+	m_ProStat = FALSE;
+	m_ReqPosture = FALSE;
 	status = 2;
+
+	workProCS.Lock();
+	isWorkingProcesses = FALSE;
+	workProCS.Unlock();
+	motionCS.Lock();
+	isMoving = FALSE;
+	motionCS.Unlock();
+	inputCS.Lock();
+	isInputing = FALSE;
+	inputCS.Unlock();
+	postureCS.Lock();
+	posture = 0;
+	postureCS.Unlock();
+
+	SetTimer(STATUS_REFRESH_TIMER, 2000, NULL);
 
 	return TRUE;  // return TRUE  unless you set the focus to a control
 }
@@ -302,6 +343,23 @@ void CActivityRecognitionDesktopDlg::DrawPicToHDC(cv::Mat m_cvImg, UINT ID)//Ipl
         SRCCOPY);
 }
 
+//void CActivityRecognitionDesktopDlg::FaceDetection()
+//{
+//	cv::Mat orgFrame;
+//	m_faceDetect = TRUE;
+//	cv::Mat gray;
+//	mCap.read(orgFrame);
+//	cv::cvtColor(orgFrame, gray, CV_BGR2GRAY);
+//	orgFrame.release();
+//	std::vector< cv::Rect_<int> > faces;
+//    haar_cascade.detectMultiScale(gray, faces);
+//	gray.release();
+//	int num = faces.size();
+//	CString faceNumStr;
+//	faceNumStr.Format("%d", num);
+//	GetDlgItem(IDC_LBL_MT)->SetWindowText(faceNumStr);
+//}
+
 UINT MotionDetectThread(LPVOID lpParam)
 {
     threadInfo* pInfo=(threadInfo*)lpParam;
@@ -351,11 +409,15 @@ UINT MotionDetectThread(LPVOID lpParam)
 		int motionSum = tmpFrame.cols*tmpFrame.rows - (int)maxV;
 		if(motionSum > MD_THRESHOLD)
 		{
-			::SetDlgItemText(m_wnd,IDC_EDT_MT,"isMoving...");
+			motionCS.Lock();
+			isMoving = TRUE;
+			motionCS.Unlock();
 		}
 		else
 		{
-			::SetDlgItemText(m_wnd,IDC_EDT_MT,"isStatic...");
+			motionCS.Lock();
+			isMoving = FALSE;
+			motionCS.Unlock();
 		}
 		//To display the final processed frames;
 		memset(m_bmih, 0, sizeof(*m_bmih));
@@ -374,9 +436,70 @@ UINT MotionDetectThread(LPVOID lpParam)
 			(BITMAPINFO*) m_bmi,
 			DIB_RGB_COLORS,
 			SRCCOPY);
+		Sleep(1000);
 	}
 	return 0;
 }
+
+//UINT FaceDetectionThread(LPVOID lpParam)
+//{
+//    threadInfo* pInfo=(threadInfo*)lpParam;
+//	CWnd* m_video = pInfo->m_video;
+//	cv::CascadeClassifier haar_cascade = pInfo->haar_cascade;
+//	cv::VideoCapture mCap;
+//	if(!mCap.open(0))
+//	{
+//		return -1;
+//	}
+//	cv::Mat m_cvImg;
+//	cv::Mat orgFrame;
+//	cv::Mat tmpFrame;
+//	BITMAPINFO*			m_bmi;
+//	BITMAPINFOHEADER*	m_bmih;
+//	unsigned int		m_buffer[sizeof(BITMAPINFOHEADER)];// + sizeof(RGBQUAD)*256];
+//	m_bmi = (BITMAPINFO*)m_buffer;
+//	m_bmih = &(m_bmi->bmiHeader);
+//	CRect rect;
+//	CDC *pDC = m_video->GetDC();
+//	m_video->GetClientRect(&rect);
+//	SetStretchBltMode(pDC->m_hDC,COLORONCOLOR);
+//	m_faceDetect = TRUE;
+//	cv::Mat gray;
+//	while(m_faceDetect)
+//	{
+//		mCap.read(m_cvImg);
+//		cv::cvtColor(m_cvImg, gray, CV_BGR2GRAY);
+//		std::vector< cv::Rect_<int> > faces;
+//        haar_cascade.detectMultiScale(gray, faces);
+//		int num = faces.size();
+//
+//		for(int i = 0; i < faces.size(); i++) {
+//            // Process face by face:
+//            cv::Rect face_i = faces[i];
+//			cv::rectangle(m_cvImg, face_i, CV_RGB(0, 255,0), 1);
+//		}
+//
+//		//To display the final processed frames;
+//		memset(m_bmih, 0, sizeof(*m_bmih));
+//		m_bmih->biSize = sizeof(BITMAPINFOHEADER);
+//		m_bmih->biWidth = m_cvImg.cols;
+//		m_bmih->biHeight = -m_cvImg.rows;           // 在自下而上的位图中 高度为负
+//		m_bmih->biPlanes = 1;
+//		m_bmih->biCompression = BI_RGB;
+//		m_bmih->biBitCount = 8 * m_cvImg.channels();
+//		//Fit the frame size to the display window size
+//		StretchDIBits(      
+//			pDC->GetSafeHdc(),
+//			0, 0, rect.Width(), rect.Height(),
+//			0, 0, m_cvImg.cols, m_cvImg.rows,
+//			m_cvImg.data,
+//			(BITMAPINFO*) m_bmi,
+//			DIB_RGB_COLORS,
+//			SRCCOPY);
+//		m_cvImg.release();
+//	}
+//	return 0;
+//}
 
 void ProcessesScanThread()
 {
@@ -407,9 +530,17 @@ void ProcessesScanThread()
 		}while( Process32Next( hProcessSnap, &pe32) );
 		//t_str.Format("%s",pe32.szExeFile);
 		if(isWorkProcesses)
-			::SetDlgItemText(m_wnd,IDC_EDT_SCAN,"isWorkingPro");
+		{
+			workProCS.Lock();
+			isWorkingProcesses = TRUE;
+			workProCS.Unlock();
+		}
 		else
-			::SetDlgItemText(m_wnd,IDC_EDT_SCAN,"noWorkingPro");
+		{
+			workProCS.Lock();
+			isWorkingProcesses = FALSE;
+			workProCS.Unlock();
+		}
 		Sleep(1000);
 		//Process32Next( hProcessSnap, &pe32);
 	}
@@ -470,31 +601,32 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnMtana()
 	}
 }
 
-
 void CActivityRecognitionDesktopDlg::OnBnClickedBtnIm()
 {
 	// TODO: Add your control notification handler code here
-	if(m_InputMonitor == false)
+	if(m_InputMonitor == FALSE)
 	{
 		if(hinstDLL=LoadLibrary((LPCTSTR)"KeyMouseHookDLL.dll"))
 		{
 			instkbhook=(inshook)GetProcAddress(hinstDLL, "InstallHook"); 
 			unstkbhook=(unhook)GetProcAddress(hinstDLL, "UnHook");
 		}
-		if(instkbhook(m_wnd))
+		if(instkbhook(m_wnd, &tmpInputStatus))
 			GetDlgItem(IDC_LBL_IM)->SetWindowText("Montering...");
 		else
 			GetDlgItem(IDC_LBL_IM)->SetWindowText("Failed Hook...");
-		m_InputMonitor = true;
+		m_InputMonitor = TRUE;
 		GetDlgItem(IDC_BTN_IM)->SetWindowText("Stop");
+		SetTimer(INPUT_STATUS_TIMER, 5000, NULL);
 	}
 	else
 	{
 		unstkbhook();
-		m_InputMonitor = false;
+		m_InputMonitor = FALSE;
 		GetDlgItem(IDC_BTN_IM)->SetWindowText("Start");
 		GetDlgItem(IDC_LBL_IM)->SetWindowText("Idle...");
 		FreeLibrary(hinstDLL);
+		KillTimer(INPUT_STATUS_TIMER);
 	}
 }
 
@@ -546,9 +678,9 @@ UINT ReceiverThreadProc(LPVOID pParam)
 		{
 			switch(status)
 			{
-			case 0:sstr = "Sleeping";break;
-			case 1:sstr = "Working";break;
-			case 2:sstr = "Playing";break;
+			case 1:sstr = "Sleeping";break;
+			case 2:sstr = "Working";break;
+			case 3:sstr = "Playing";break;
 			default: sstr = "Internel error";break;
 			}
 		}
@@ -564,37 +696,164 @@ UINT ReceiverThreadProc(LPVOID pParam)
 
 void CActivityRecognitionDesktopDlg::OnBnClickedBtnTest()
 {
-	// TODO: Add your control notification handler code here
-//	pMDThread = AfxBeginThread(ReceiverThreadProc, NULL);
+
+
 }
 
-//UINT SenderThreadProc(LPVOID pParam)
-//{
-//	if (!AfxSocketInit())  
-//     {  
-//         AfxMessageBox("Socket initial failed!!!");  
-//         return FALSE;   
-//     }
-//     char buf[BUFLEN];
-//     CSocket SendSock;
-//     SendSock.Create(23456U,SOCK_STREAM,"127.0.0.1");
-//     if (!SendSock.Connect((SOCKADDR *)&RecAddr,sizeof(RecAddr)))
-//     {
-//         CString str;
-//         str.Format("Connect error code:%d",SendSock.GetLastError());
-//         AfxMessageBox(str);
-//         free(temp);
-//         return 0;
-//     }
-//	 while(TRUE)
-//	 {
-//		 
-//		 //往buf中添加数据
-//		 SendSock.Send(buf,BUFLEN);
-//		 SendSock.Close();
-//	 }
-//     return 1;
-//}
+void CActivityRecognitionDesktopDlg::OnTimer(UINT_PTR nIDEvent)
+{
+	CString tmp;
+	switch(nIDEvent)
+	{
+	case INPUT_STATUS_TIMER: 
+		inputCS.Lock();
+		isInputing = tmpInputStatus;
+		inputCS.Unlock();
+		tmpInputStatus = FALSE;
+		break;
+	case STATUS_REFRESH_TIMER:
+		if(isWorkingProcesses)
+			GetDlgItem(IDC_EDT_SCAN)->SetWindowText("isWorkingPro...");
+		else
+			GetDlgItem(IDC_EDT_SCAN)->SetWindowText("noWorkingPro...");
+		if(isMoving)
+			GetDlgItem(IDC_EDT_MT)->SetWindowText("isMoving...");
+		else
+			GetDlgItem(IDC_EDT_MT)->SetWindowText("isStatic...");
+		if(isInputing)
+			GetDlgItem(IDC_EDT_IM)->SetWindowText("isInputing...");
+		else
+			GetDlgItem(IDC_EDT_IM)->SetWindowText("noInputing...");
+		switch(posture)
+		{
+		case 0: 
+			GetDlgItem(IDC_EDT_PR)->SetWindowText("unavailable...");break;
+		case (int)'1': 
+			GetDlgItem(IDC_EDT_PR)->SetWindowText("Left");break;
+		case (int)'2': 
+			GetDlgItem(IDC_EDT_PR)->SetWindowText("Right");break;
+		}
+		if(!isMoving && !isInputing)
+		{
+			GetDlgItem(IDC_LBL_STAT)->SetWindowText("Sleeping");
+			status = 1;
+		}
+		else if(isWorkingProcesses)
+		{
+			GetDlgItem(IDC_LBL_STAT)->SetWindowText("Working");
+			status = 2;
+		}
+		else
+		{
+			GetDlgItem(IDC_LBL_STAT)->SetWindowText("Playing");
+			status = 3;
+		}
+		break;
+	default: ;break;
+	}
+}
+
+UINT RequestThreadProc(LPVOID pParam)
+{
+	if (!AfxSocketInit())  
+	{  
+		AfxMessageBox("Socket initial failed!!!");  
+		return FALSE;   
+	}
+	/*char buf[1024];
+	CSocket reqSock;
+	int rlen;
+	reqSock.Create(34567U,SOCK_STREAM,"127.0.0.1");
+	if (!reqSock.Connect("127.0.0.1",23456U))
+	{
+		CString str;
+		str.Format("Connect error code:%d",reqSock.GetLastError());
+		AfxMessageBox(str);
+		return 0;
+	}
+	while(m_ReqPosture)
+	{
+		CString reqCmdStr = "req posture";
+		reqSock.Send(reqCmdStr,reqCmdStr.GetLength());
+		rlen = reqSock.Receive(buf,sizeof(buf));
+		CString t_disStr;
+		t_disStr.Format("%s",buf);
+		t_disStr = t_disStr.GetBufferSetLength(rlen);
+		if(t_disStr == "normal")
+		{
+			postureCS.Lock();
+			posture = 1;
+			postureCS.Unlock();
+		}
+		Sleep(3000);
+	}
+	postureCS.Lock();
+	posture = 0;
+	postureCS.Unlock();
+	reqSock.Close();
+	return 1;*/
+	//CSocket recSoc;
+	////recSoc.Create(12345U,SOCK_DGRAM,"127.0.0.1");
+	//char buf[1024];
+	//CString serAddr("127.0.0.1");
+	//recSoc.Bind(22222,"127.0.0.1");
+	//while(true)
+	//{
+	//	int rlen = -1;
+	//	while(rlen == -1)
+	//	{
+	//		rlen = recSoc.rec
+	//	}
+	//	postureCS.Lock();
+	//	posture = rlen;
+	//	postureCS.Unlock();
+	//}
+	WSADATA wsaData; 
+	int error=WSAStartup(MAKEWORD(1,1),&wsaData);
+	if(error!=0)
+	{
+		return -1;
+	}
+	if(LOBYTE(wsaData.wVersion)!=1 || HIBYTE(wsaData.wVersion)!=1)
+	{
+		WSACleanup();
+		return -1;
+	}
+	SOCKET s=socket(AF_INET,SOCK_DGRAM,0);
+
+	SOCKADDR_IN sockSrc;
+	sockSrc.sin_addr.S_un.S_addr=htonl(INADDR_ANY);
+	sockSrc.sin_port=htons(22222);
+	sockSrc.sin_family=AF_INET;
+
+	bind(s,(SOCKADDR *)&sockSrc,sizeof(SOCKADDR));
+
+	char recBuff[1024];
+	memset(recBuff,0,1024);
+ 
+	SOCKADDR_IN sockRec;
+	int len=sizeof(SOCKADDR);
+	while(m_ReqPosture)
+	{
+		int x=-1;
+		while(x==-1)
+		{
+			x=recvfrom(s,recBuff,sizeof(recBuff),0,(sockaddr *)&sockRec,&len); 
+		}
+		postureCS.Lock();
+		posture = (int)recBuff[0];
+		if(posture == tPosture)
+			keepCount++;
+		else
+		{
+			tPosture = posture;
+			keepCount = 0;
+		}
+		postureCS.Unlock();
+	}
+	closesocket(s);
+	WSACleanup();
+}
 
 void CActivityRecognitionDesktopDlg::OnBnClickedBtnPs()
 {
@@ -611,5 +870,35 @@ void CActivityRecognitionDesktopDlg::OnBnClickedBtnPs()
 		m_ProStat = false;
 		GetDlgItem(IDC_BTN_PS)->SetWindowText("Start");
 		GetDlgItem(IDC_LBL_PS)->SetWindowText("Idle...");
+	}
+}
+
+void CActivityRecognitionDesktopDlg::OnBnClickedOk()
+{
+	// TODO: Add your control notification handler code here
+	KillTimer(STATUS_REFRESH_TIMER);
+	CDialogEx::OnOK();
+}
+
+void CActivityRecognitionDesktopDlg::OnBnClickedBtnPr()
+{
+	// TODO: Add your control notification handler code here
+	if(m_ReqPosture == false)
+	{	
+		pPStatThread = AfxBeginThread(RequestThreadProc, NULL);
+		GetDlgItem(IDC_LBL_PR)->SetWindowText("Requesting...");
+		m_ReqPosture = true;
+		keepCount = 0;
+		GetDlgItem(IDC_BTN_PR)->SetWindowText("Stop");
+	}
+	else
+	{
+		m_ReqPosture = false;
+		postureCS.Lock();
+		posture = 0;
+		postureCS.Unlock();
+		GetDlgItem(IDC_BTN_PR)->SetWindowText("Start");
+		GetDlgItem(IDC_LBL_PR)->SetWindowText("Idle...");
+		GetDlgItem(IDC_EDT_PR)->SetWindowText("unavailable...");
 	}
 }
